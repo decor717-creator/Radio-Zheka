@@ -147,3 +147,12 @@ input[type="range"] { accent-color:var(--accent); width:100%; }
   .fav-btn, .play-card-btn, .delete-btn { width:35px; height:35px; }
   .timer-grid { grid-template-columns:repeat(2,1fr); }
 }
+
+/* iPhone battery/stability mode */
+.ios .hero-glow { display:none; }
+.ios .mini-player {
+  backdrop-filter:none;
+  -webkit-backdrop-filter:none;
+  background:#0c1219;
+}
+.ios .sheet-dialog::backdrop { backdrop-filter:none; }

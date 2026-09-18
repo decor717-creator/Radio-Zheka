@@ -59,6 +59,17 @@ let eqFilters = [];
 let eqPreset = localStorage.getItem('radioEqPreset') || 'flat';
 const pageSize = 30;
 
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+let wantedPlaying = false;
+let reconnectTimer = null;
+let reconnectAttempts = 0;
+let waitingTimer = null;
+let playRequestId = 0;
+const MAX_RECONNECT_ATTEMPTS = 3;
+
+if (isIOS) document.documentElement.classList.add('ios');
+
 const favorites = new Set(safeParse('radioFavorites', []));
 const stationCache = safeParse('radioStationCache', {});
 let history = safeParse('radioHistory', []);
@@ -308,8 +319,70 @@ function toggleFavorite(uuid) {
   showFavoritesOnly ? renderFavorites() : renderStations();
 }
 
-async function playStation(station, index = -1) {
+function clearPlaybackTimers() {
+  clearTimeout(reconnectTimer);
+  clearTimeout(waitingTimer);
+  reconnectTimer = null;
+  waitingTimer = null;
+}
+
+function resetStreamElement(player, url) {
+  player.pause();
+  player.removeAttribute('src');
+  player.load();
+  player.src = url;
+  player.load();
+}
+
+function isAutoplayBlock(err) {
+  return err?.name === 'NotAllowedError' || err?.name === 'AbortError';
+}
+
+function waitForPlaying(player, timeoutMs = 10000) {
+  if (!player.paused && player.readyState >= 2) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error('START_TIMEOUT'));
+    }, timeoutMs);
+    const onPlaying = () => { cleanup(); resolve(); };
+    const onError = () => { cleanup(); reject(player.error || new Error('STREAM_ERROR')); };
+    const cleanup = () => {
+      clearTimeout(timer);
+      player.removeEventListener('playing', onPlaying);
+      player.removeEventListener('error', onError);
+    };
+    player.addEventListener('playing', onPlaying, { once: true });
+    player.addEventListener('error', onError, { once: true });
+  });
+}
+
+async function reconnectCurrent(reason = 'Переподключение…', userInitiated = false) {
+  if (!currentStation || (!wantedPlaying && !userInitiated)) return;
+  clearPlaybackTimers();
+  updateNowPlaying(reason);
+  await playStation(currentStation, currentIndex, { forceReload: true, retrying: true });
+}
+
+function scheduleReconnect(delay = 1800, reason = 'Восстанавливаем эфир…') {
+  if (!wantedPlaying || !currentStation || reconnectTimer) return;
+  if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+    updateNowPlaying('Нажмите ▶, чтобы продолжить');
+    return;
+  }
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null;
+    reconnectAttempts += 1;
+    await reconnectCurrent(reason);
+  }, delay);
+}
+
+async function playStation(station, index = -1, options = {}) {
   if (!station?.url) return;
+  const { forceReload = false, retrying = false } = options;
+  const requestId = ++playRequestId;
+  clearPlaybackTimers();
+  wantedPlaying = true;
   audio.pause();
   eqAudio.pause();
   currentStation = station;
@@ -344,29 +417,49 @@ async function playStation(station, index = -1) {
     eqAudio.pause();
   }
 
-  if (player.src !== station.url) {
+  const sourceChanged = player.src !== station.url;
+  if (forceReload) {
+    resetStreamElement(player, station.url);
+  } else if (sourceChanged) {
     player.src = station.url;
     player.load();
   }
   player.volume = Number(volume.value);
 
   try {
-    await player.play();
+    const playPromise = player.play();
+    await Promise.all([playPromise, waitForPlaying(player, 10000)]);
+    if (requestId !== playRequestId) return;
+    reconnectAttempts = 0;
     updateNowPlaying('В эфире');
     addToHistory(station);
-    reportClick(station.stationuuid);
+    if (!retrying) reportClick(station.stationuuid);
   } catch (err) {
+    if (requestId !== playRequestId) return;
     console.error(err);
-    updateNowPlaying('Не удалось запустить поток');
-    showToast('Поток станции сейчас не воспроизводится');
+    if (isAutoplayBlock(err)) {
+      updateNowPlaying('Нажмите ▶, чтобы продолжить');
+      showToast('iPhone остановил звук. Нажмите ▶ для продолжения.');
+    } else if (!retrying) {
+      updateNowPlaying('Повторное подключение…');
+      scheduleReconnect(900, 'Повторное подключение…');
+    } else {
+      updateNowPlaying('Не удалось восстановить поток');
+      scheduleReconnect(2200, 'Ещё одна попытка…');
+    }
   }
   renderAllPlayingStates();
 }
 
 function activeAudio() { return eqEnabled && !eqAudio.paused ? eqAudio : audio; }
 function pauseRadio() {
+  wantedPlaying = false;
+  reconnectAttempts = 0;
+  clearPlaybackTimers();
+  ++playRequestId;
   audio.pause();
   eqAudio.pause();
+  if (audioContext?.state === 'running') audioContext.suspend().catch(() => {});
   updateNowPlaying('Пауза');
   renderAllPlayingStates();
 }
@@ -376,7 +469,10 @@ function togglePlay() {
     else if (featuredStations.length) playStation(featuredStations[0], -1);
     return;
   }
-  if (activeAudio().paused) playStation(currentStation, currentIndex); else pauseRadio();
+  if (activeAudio().paused) {
+    reconnectAttempts = 0;
+    playStation(currentStation, currentIndex, { forceReload: true });
+  } else pauseRadio();
 }
 
 function updateNowPlaying(status) {
@@ -564,14 +660,22 @@ function applyEqPreset(name) {
 }
 
 async function toggleEq(on) {
+  if (isIOS && on) {
+    eqEnabled = false;
+    eqToggle.checked = false;
+    updateEqUi('На iPhone отключён для экономии аккумулятора и стабильности');
+    showToast('Эквалайзер отключён на iPhone для стабильной работы');
+    return;
+  }
   if (!on) {
     eqEnabled = false;
     eqToggle.checked = false;
     updateEqUi('Включается для совместимых потоков');
+    if (audioContext?.state === 'running') await audioContext.suspend().catch(() => {});
     if (currentStation) {
       const wasPlaying = !eqAudio.paused;
       eqAudio.pause();
-      if (wasPlaying) await playStation(currentStation, currentIndex);
+      if (wasPlaying) await playStation(currentStation, currentIndex, { forceReload: true });
     }
     return;
   }
@@ -699,17 +803,69 @@ $('addStationForm').addEventListener('submit', (e) => {
 });
 
 [audio, eqAudio].forEach(player => {
-  player.addEventListener('playing', () => { if (player === activeAudio()) updateNowPlaying('В эфире'); });
-  player.addEventListener('pause', () => { if (currentStation && audio.paused && eqAudio.paused) updateNowPlaying('Пауза'); });
-  player.addEventListener('waiting', () => { if (player === activeAudio() && currentStation) updateNowPlaying('Буферизация…'); });
-  player.addEventListener('error', () => { if (player === activeAudio() && currentStation) updateNowPlaying('Ошибка потока'); });
+  player.addEventListener('playing', () => {
+    if (player !== activeAudio()) return;
+    clearTimeout(waitingTimer);
+    waitingTimer = null;
+    reconnectAttempts = 0;
+    updateNowPlaying('В эфире');
+  });
+  player.addEventListener('pause', () => {
+    if (currentStation && audio.paused && eqAudio.paused && !wantedPlaying) updateNowPlaying('Пауза');
+  });
+  player.addEventListener('waiting', () => {
+    if (player !== activeAudio() || !currentStation || !wantedPlaying) return;
+    updateNowPlaying('Буферизация…');
+    clearTimeout(waitingTimer);
+    waitingTimer = setTimeout(() => {
+      waitingTimer = null;
+      if (wantedPlaying && player === activeAudio()) {
+        reconnectCurrent('Поток завис — переподключаемся…');
+      }
+    }, 6000);
+  });
+  player.addEventListener('stalled', () => {
+    if (player === activeAudio() && wantedPlaying) scheduleReconnect(2500, 'Связь прервалась — восстанавливаем…');
+  });
+  player.addEventListener('error', () => {
+    if (player !== activeAudio() || !currentStation) return;
+    updateNowPlaying('Ошибка потока');
+    scheduleReconnect(1200, 'Восстанавливаем эфир…');
+  });
 });
 
 if ('mediaSession' in navigator) {
-  navigator.mediaSession.setActionHandler('play', () => currentStation && playStation(currentStation, currentIndex));
+  navigator.mediaSession.setActionHandler('play', () => {
+    if (!currentStation) return;
+    reconnectAttempts = 0;
+    playStation(currentStation, currentIndex, { forceReload: true });
+  });
   navigator.mediaSession.setActionHandler('pause', pauseRadio);
   navigator.mediaSession.setActionHandler('previoustrack', () => moveStation(-1));
   navigator.mediaSession.setActionHandler('nexttrack', () => moveStation(1));
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !wantedPlaying || !currentStation) return;
+  setTimeout(() => {
+    if (wantedPlaying && currentStation && activeAudio().paused) {
+      reconnectAttempts = 0;
+      reconnectCurrent('Возвращаемся в эфир…');
+    }
+  }, 450);
+});
+
+window.addEventListener('pageshow', () => {
+  if (wantedPlaying && currentStation && activeAudio().paused) {
+    setTimeout(() => reconnectCurrent('Восстанавливаем эфир…'), 450);
+  }
+});
+
+if (isIOS) {
+  eqEnabled = false;
+  eqToggle.checked = false;
+  eqToggle.disabled = true;
+  updateEqUi('На iPhone отключён: меньше расход аккумулятора и выше стабильность');
 }
 
 if ('serviceWorker' in navigator) {

@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#090d12" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Моё Радио" />
+  <meta name="description" content="Удобное интернет-радио: поиск, избранное, история, таймер сна и эквалайзер." />
+  <title>Моё Радио</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">ИНТЕРНЕТ-РАДИО</p>
+        <h1>Моё Радио</h1>
+      </div>
+      <div class="top-actions">
+        <button id="addStationBtn" class="icon-btn" type="button" aria-label="Добавить свою станцию" title="Добавить станцию">＋</button>
+        <button id="favoritesToggle" class="icon-btn" type="button" aria-label="Показать избранное" title="Избранное">♥</button>
+        <button id="settingsBtn" class="icon-btn" type="button" aria-label="Настройки плеера" title="Настройки">⚙</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero" id="hero">
+        <div class="hero-glow"></div>
+        <div class="hero-topline">
+          <div class="now-cover" id="nowCover">♫</div>
+          <div class="hero-flags">
+            <span class="live-badge"><i></i> LIVE</span>
+            <span id="sleepBadge" class="sleep-badge" hidden>◷ 00:00</span>
+          </div>
+        </div>
+
+        <div class="now-meta">
+          <p id="nowStatus" class="now-status">Готово к эфиру</p>
+          <h2 id="nowName">Выберите радиостанцию</h2>
+          <p id="nowDetails">Найдите станцию или выберите популярную.</p>
+        </div>
+
+        <div class="player-controls">
+          <button id="prevBtn" class="round-btn small" type="button" aria-label="Предыдущая станция">‹</button>
+          <button id="playBtn" class="round-btn play" type="button" aria-label="Воспроизвести">▶</button>
+          <button id="nextBtn" class="round-btn small" type="button" aria-label="Следующая станция">›</button>
+        </div>
+
+        <div class="volume-row">
+          <span>🔈</span>
+          <input id="volume" type="range" min="0" max="1" step="0.01" value="0.85" aria-label="Громкость" />
+          <span>🔊</span>
+        </div>
+      </section>
+
+      <section class="search-section">
+        <label class="search-box">
+          <span>⌕</span>
+          <input id="searchInput" type="search" placeholder="Название станции, город или жанр" autocomplete="off" />
+          <button id="clearSearch" type="button" aria-label="Очистить поиск">×</button>
+        </label>
+
+        <div class="chips" id="chips">
+          <button class="chip active" data-mode="popular">Популярное</button>
+          <button class="chip" data-mode="ru">🇷🇺 Россия</button>
+          <button class="chip" data-mode="de">🇩🇪 Германия</button>
+          <button class="chip" data-mode="rock">Рок</button>
+          <button class="chip" data-mode="electronic">Электроника</button>
+          <button class="chip" data-mode="jazz">Джаз</button>
+          <button class="chip" data-mode="chillout">Chillout</button>
+          <button class="chip" data-mode="news">Новости</button>
+          <button class="chip" data-mode="custom">Мои</button>
+        </div>
+      </section>
+
+      <section class="rail-section" id="featuredSection">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">БЫСТРЫЙ ДОСТУП</p>
+            <h3>Популярное в России</h3>
+          </div>
+          <button id="showRussiaBtn" class="text-btn" type="button">Все</button>
+        </div>
+        <div id="featuredRail" class="station-rail" aria-live="polite"></div>
+      </section>
+
+      <section class="rail-section" id="historySection" hidden>
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">НЕДАВНО</p>
+            <h3>История прослушивания</h3>
+          </div>
+          <button id="clearHistoryBtn" class="text-btn muted" type="button">Очистить</button>
+        </div>
+        <div id="historyRail" class="station-rail compact" aria-live="polite"></div>
+      </section>
+
+      <section class="list-section">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">КАТАЛОГ</p>
+            <h3 id="listTitle">Популярные станции</h3>
+          </div>
+          <span id="statusText">Загрузка…</span>
+        </div>
+        <div id="stationList" class="station-list" aria-live="polite"></div>
+        <button id="loadMoreBtn" class="load-more" type="button" hidden>Показать ещё</button>
+      </section>
+    </main>
+
+    <footer class="mini-player" id="miniPlayer" hidden>
+      <button class="mini-main" id="miniOpenBtn" type="button" aria-label="Открыть плеер">
+        <div class="mini-cover" id="miniCover">♫</div>
+        <div class="mini-meta">
+          <strong id="miniName">—</strong>
+          <span id="miniStatus">Остановлено</span>
+        </div>
+      </button>
+      <button id="miniPlayBtn" class="mini-play" type="button" aria-label="Воспроизвести">▶</button>
+    </footer>
+  </div>
+
+  <dialog id="settingsDialog" class="sheet-dialog">
+    <form method="dialog" class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-head">
+        <div>
+          <p class="section-kicker">ПЛЕЕР</p>
+          <h2>Настройки звука</h2>
+        </div>
+        <button class="sheet-close" value="cancel" aria-label="Закрыть">×</button>
+      </div>
+
+      <section class="setting-block">
+        <div class="setting-row">
+          <div>
+            <strong>Таймер сна</strong>
+            <span>Радио выключится автоматически</span>
+          </div>
+          <button id="cancelSleepBtn" class="small-text-btn" type="button" hidden>Отменить</button>
+        </div>
+        <div class="timer-grid" id="timerGrid">
+          <button type="button" data-minutes="15">15 мин</button>
+          <button type="button" data-minutes="30">30 мин</button>
+          <button type="button" data-minutes="45">45 мин</button>
+          <button type="button" data-minutes="60">1 час</button>
+          <button type="button" data-minutes="90">1,5 часа</button>
+          <button type="button" data-minutes="120">2 часа</button>
+        </div>
+      </section>
+
+      <section class="setting-block">
+        <div class="setting-row">
+          <div>
+            <strong>Эквалайзер</strong>
+            <span id="eqHint">Включается для совместимых потоков</span>
+          </div>
+          <label class="switch">
+            <input id="eqToggle" type="checkbox" />
+            <span></span>
+          </label>
+        </div>
+        <div class="preset-grid" id="presetGrid">
+          <button type="button" class="preset active" data-preset="flat">Обычный</button>
+          <button type="button" class="preset" data-preset="bass">Бас</button>
+          <button type="button" class="preset" data-preset="voice">Голос</button>
+          <button type="button" class="preset" data-preset="bright">Яркий</button>
+        </div>
+      </section>
+
+      <section class="setting-block info-block">
+        <strong>Подсказка для iPhone</strong>
+        <p>Откройте приложение в Safari → «Поделиться» → «На экран Домой». Тогда оно будет запускаться как отдельное приложение.</p>
+      </section>
+    </form>
+  </dialog>
+
+  <dialog id="addStationDialog" class="sheet-dialog">
+    <form id="addStationForm" class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-head">
+        <div>
+          <p class="section-kicker">СВОЯ СТАНЦИЯ</p>
+          <h2>Добавить поток</h2>
+        </div>
+        <button id="closeAddStation" class="sheet-close" type="button" aria-label="Закрыть">×</button>
+      </div>
+      <label class="field">
+        <span>Название</span>
+        <input id="customName" type="text" placeholder="Например, Любимое радио" required maxlength="80" />
+      </label>
+      <label class="field">
+        <span>Ссылка на поток</span>
+        <input id="customUrl" type="url" placeholder="https://.../stream.mp3" required inputmode="url" />
+      </label>
+      <label class="field">
+        <span>Логотип — необязательно</span>
+        <input id="customIcon" type="url" placeholder="https://.../logo.png" inputmode="url" />
+      </label>
+      <p id="customFormError" class="form-error" hidden></p>
+      <button class="primary-btn" type="submit">Добавить станцию</button>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <audio id="audio" preload="none"></audio>
+  <audio id="eqAudio" preload="none" crossorigin="anonymous"></audio>
+  <script src="app.js"></script>
+</body>
+</html>

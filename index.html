@@ -11,7 +11,7 @@
   <title>Моё Радио</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=4" />
 </head>
 <body>
   <div class="app-shell">
@@ -50,11 +50,6 @@
           <button id="nextBtn" class="round-btn small" type="button" aria-label="Следующая станция">›</button>
         </div>
 
-        <div class="volume-row">
-          <span>🔈</span>
-          <input id="volume" type="range" min="0" max="1" step="0.01" value="0.85" aria-label="Громкость" />
-          <span>🔊</span>
-        </div>
       </section>
 
       <section class="search-section">
@@ -210,6 +205,6 @@
 
   <audio id="audio" preload="none"></audio>
   <audio id="eqAudio" preload="none" crossorigin="anonymous"></audio>
-  <script src="app.js"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

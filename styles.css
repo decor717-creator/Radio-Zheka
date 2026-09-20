@@ -49,13 +49,11 @@ h1 { margin:0; font-size:30px; letter-spacing:-.045em; }
 .now-status { margin:0 0 5px; color:var(--accent); font-size:12px; font-weight:800; }
 .now-meta h2 { margin:0 0 7px; font-size:27px; letter-spacing:-.04em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .now-meta > p:last-child { margin:0; color:var(--muted); font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.player-controls { display:flex; justify-content:center; align-items:center; gap:24px; margin:26px 0 20px; }
+.player-controls { display:flex; justify-content:center; align-items:center; gap:24px; margin:26px 0 4px; }
 .round-btn { border:none; border-radius:50%; display:grid; place-items:center; background:rgba(255,255,255,.08); transition:.16s ease; }
 .round-btn.small { width:50px; height:50px; font-size:36px; line-height:1; }
 .round-btn.play { width:74px; height:74px; background:var(--text); color:#09100e; font-size:26px; box-shadow:0 12px 26px rgba(0,0,0,.34); }
 .round-btn:active, .icon-btn:active, .chip:active, .station-card:active, .rail-card:active, .mini-play:active, .timer-grid button:active, .preset:active { transform:scale(.97); }
-.volume-row { display:grid; grid-template-columns:auto 1fr auto; gap:10px; align-items:center; color:var(--muted); font-size:13px; }
-input[type="range"] { accent-color:var(--accent); width:100%; }
 .search-section { margin-top:24px; }
 .search-box { height:54px; display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:10px; padding:0 14px; border:1px solid var(--line); border-radius:18px; background:rgba(255,255,255,.045); }
 .search-box span { font-size:24px; color:var(--muted); transform:rotate(-15deg); }
@@ -83,6 +81,11 @@ input[type="range"] { accent-color:var(--accent); width:100%; }
 .station-card { width:100%; border:1px solid var(--line); border-radius:20px; padding:12px; display:grid; grid-template-columns:58px minmax(0,1fr) auto; gap:12px; align-items:center; background:rgba(17,24,32,.78); text-align:left; transition:.16s ease; }
 .station-card.playing { border-color:rgba(114,239,197,.45); background:rgba(114,239,197,.07); }
 .station-logo { width:58px; height:58px; border-radius:16px; display:grid; place-items:center; font-weight:900; font-size:18px; color:#fff; background:linear-gradient(135deg, #334155, #0f766e); background-size:cover; background-position:center; overflow:hidden; }
+.station-logo, .rail-logo { position:relative; }
+.logo-fallback { position:absolute; inset:0; display:grid; place-items:center; z-index:0; font:900 18px/1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color:#fff; letter-spacing:.02em; }
+.logo-fallback.compact { font-size:26px; }
+.station-logo-img { position:absolute; inset:0; z-index:1; width:100%; height:100%; object-fit:cover; display:block; background:inherit; }
+
 .station-main { min-width:0; }
 .station-name { display:block; font-weight:850; font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .station-desc { display:block; margin-top:4px; color:var(--muted); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -147,12 +150,3 @@ input[type="range"] { accent-color:var(--accent); width:100%; }
   .fav-btn, .play-card-btn, .delete-btn { width:35px; height:35px; }
   .timer-grid { grid-template-columns:repeat(2,1fr); }
 }
-
-/* iPhone battery/stability mode */
-.ios .hero-glow { display:none; }
-.ios .mini-player {
-  backdrop-filter:none;
-  -webkit-backdrop-filter:none;
-  background:#0c1219;
-}
-.ios .sheet-dialog::backdrop { backdrop-filter:none; }

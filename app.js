@@ -17,7 +17,6 @@ const playBtn = $('playBtn');
 const miniPlayBtn = $('miniPlayBtn');
 const prevBtn = $('prevBtn');
 const nextBtn = $('nextBtn');
-const volume = $('volume');
 const nowName = $('nowName');
 const nowDetails = $('nowDetails');
 const nowStatus = $('nowStatus');
@@ -59,26 +58,11 @@ let eqFilters = [];
 let eqPreset = localStorage.getItem('radioEqPreset') || 'flat';
 const pageSize = 30;
 
-const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-let wantedPlaying = false;
-let reconnectTimer = null;
-let reconnectAttempts = 0;
-let waitingTimer = null;
-let playRequestId = 0;
-const MAX_RECONNECT_ATTEMPTS = 3;
-
-if (isIOS) document.documentElement.classList.add('ios');
-
 const favorites = new Set(safeParse('radioFavorites', []));
 const stationCache = safeParse('radioStationCache', {});
 let history = safeParse('radioHistory', []);
 let customStations = safeParse('radioCustomStations', []);
 
-const savedVolume = clamp(Number(localStorage.getItem('radioVolume') || 0.85), 0, 1);
-audio.volume = savedVolume;
-eqAudio.volume = savedVolume;
-volume.value = savedVolume;
 
 const modeConfig = {
   popular: { title: 'Популярные станции', params: { order: 'clickcount', reverse: 'true' } },
@@ -102,7 +86,6 @@ function safeParse(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback)); }
   catch { return fallback; }
 }
-function clamp(n, min, max) { return Math.min(max, Math.max(min, n)); }
 function saveFavorites() { localStorage.setItem('radioFavorites', JSON.stringify([...favorites])); }
 function saveCache() { localStorage.setItem('radioStationCache', JSON.stringify(stationCache)); }
 function saveHistory() { localStorage.setItem('radioHistory', JSON.stringify(history)); }
@@ -248,6 +231,7 @@ function renderStations() {
   stationList.querySelectorAll('.station-card').forEach(card => {
     card.addEventListener('click', () => playStation(visibleStations[Number(card.dataset.index)], Number(card.dataset.index)));
   });
+  wireLogoFallbacks(stationList);
 }
 
 function stationCardHtml(s, index) {
@@ -256,7 +240,7 @@ function stationCardHtml(s, index) {
   const meta = [s.countrycode || (s.custom ? 'МОЯ' : ''), s.codec, s.bitrate ? `${s.bitrate} kbps` : ''].filter(Boolean).join(' · ');
   return `
     <article class="station-card ${isPlaying ? 'playing' : ''}" data-index="${index}">
-      <div class="station-logo" ${coverStyle(s)}>${s.favicon ? '' : initials(s.name)}</div>
+      <div class="station-logo">${logoMarkup(s)}</div>
       <div class="station-main">
         <span class="station-name">${escapeHtml(s.name)}</span>
         <span class="station-desc">${escapeHtml(meta || firstTags(s) || 'Интернет-радио')}</span>
@@ -276,7 +260,7 @@ function renderRail(container, items, source) {
   }
   container.innerHTML = items.map((s, i) => `
     <button class="rail-card ${currentStation?.stationuuid === s.stationuuid ? 'playing' : ''}" type="button" data-rail-source="${source}" data-rail-index="${i}">
-      <span class="rail-logo" ${coverStyle(s)}>${s.favicon ? '' : initials(s.name)}</span>
+      <span class="rail-logo">${logoMarkup(s, true)}</span>
       <span class="rail-name">${escapeHtml(s.name)}</span>
       <span class="rail-meta">${escapeHtml(s.countrycode || firstTags(s) || 'Радио')}</span>
     </button>`).join('');
@@ -287,6 +271,7 @@ function renderRail(container, items, source) {
       if (station) playStation(station, visibleStations.findIndex(s => s.stationuuid === station.stationuuid));
     });
   });
+  wireLogoFallbacks(container);
 }
 
 function renderFavorites() {
@@ -319,70 +304,8 @@ function toggleFavorite(uuid) {
   showFavoritesOnly ? renderFavorites() : renderStations();
 }
 
-function clearPlaybackTimers() {
-  clearTimeout(reconnectTimer);
-  clearTimeout(waitingTimer);
-  reconnectTimer = null;
-  waitingTimer = null;
-}
-
-function resetStreamElement(player, url) {
-  player.pause();
-  player.removeAttribute('src');
-  player.load();
-  player.src = url;
-  player.load();
-}
-
-function isAutoplayBlock(err) {
-  return err?.name === 'NotAllowedError' || err?.name === 'AbortError';
-}
-
-function waitForPlaying(player, timeoutMs = 10000) {
-  if (!player.paused && player.readyState >= 2) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      cleanup();
-      reject(new Error('START_TIMEOUT'));
-    }, timeoutMs);
-    const onPlaying = () => { cleanup(); resolve(); };
-    const onError = () => { cleanup(); reject(player.error || new Error('STREAM_ERROR')); };
-    const cleanup = () => {
-      clearTimeout(timer);
-      player.removeEventListener('playing', onPlaying);
-      player.removeEventListener('error', onError);
-    };
-    player.addEventListener('playing', onPlaying, { once: true });
-    player.addEventListener('error', onError, { once: true });
-  });
-}
-
-async function reconnectCurrent(reason = 'Переподключение…', userInitiated = false) {
-  if (!currentStation || (!wantedPlaying && !userInitiated)) return;
-  clearPlaybackTimers();
-  updateNowPlaying(reason);
-  await playStation(currentStation, currentIndex, { forceReload: true, retrying: true });
-}
-
-function scheduleReconnect(delay = 1800, reason = 'Восстанавливаем эфир…') {
-  if (!wantedPlaying || !currentStation || reconnectTimer) return;
-  if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-    updateNowPlaying('Нажмите ▶, чтобы продолжить');
-    return;
-  }
-  reconnectTimer = setTimeout(async () => {
-    reconnectTimer = null;
-    reconnectAttempts += 1;
-    await reconnectCurrent(reason);
-  }, delay);
-}
-
-async function playStation(station, index = -1, options = {}) {
+async function playStation(station, index = -1) {
   if (!station?.url) return;
-  const { forceReload = false, retrying = false } = options;
-  const requestId = ++playRequestId;
-  clearPlaybackTimers();
-  wantedPlaying = true;
   audio.pause();
   eqAudio.pause();
   currentStation = station;
@@ -417,49 +340,28 @@ async function playStation(station, index = -1, options = {}) {
     eqAudio.pause();
   }
 
-  const sourceChanged = player.src !== station.url;
-  if (forceReload) {
-    resetStreamElement(player, station.url);
-  } else if (sourceChanged) {
+  if (player.src !== station.url) {
     player.src = station.url;
     player.load();
   }
-  player.volume = Number(volume.value);
 
   try {
-    const playPromise = player.play();
-    await Promise.all([playPromise, waitForPlaying(player, 10000)]);
-    if (requestId !== playRequestId) return;
-    reconnectAttempts = 0;
+    await player.play();
     updateNowPlaying('В эфире');
     addToHistory(station);
-    if (!retrying) reportClick(station.stationuuid);
+    reportClick(station.stationuuid);
   } catch (err) {
-    if (requestId !== playRequestId) return;
     console.error(err);
-    if (isAutoplayBlock(err)) {
-      updateNowPlaying('Нажмите ▶, чтобы продолжить');
-      showToast('iPhone остановил звук. Нажмите ▶ для продолжения.');
-    } else if (!retrying) {
-      updateNowPlaying('Повторное подключение…');
-      scheduleReconnect(900, 'Повторное подключение…');
-    } else {
-      updateNowPlaying('Не удалось восстановить поток');
-      scheduleReconnect(2200, 'Ещё одна попытка…');
-    }
+    updateNowPlaying('Не удалось запустить поток');
+    showToast('Поток станции сейчас не воспроизводится');
   }
   renderAllPlayingStates();
 }
 
 function activeAudio() { return eqEnabled && !eqAudio.paused ? eqAudio : audio; }
 function pauseRadio() {
-  wantedPlaying = false;
-  reconnectAttempts = 0;
-  clearPlaybackTimers();
-  ++playRequestId;
   audio.pause();
   eqAudio.pause();
-  if (audioContext?.state === 'running') audioContext.suspend().catch(() => {});
   updateNowPlaying('Пауза');
   renderAllPlayingStates();
 }
@@ -469,10 +371,7 @@ function togglePlay() {
     else if (featuredStations.length) playStation(featuredStations[0], -1);
     return;
   }
-  if (activeAudio().paused) {
-    reconnectAttempts = 0;
-    playStation(currentStation, currentIndex, { forceReload: true });
-  } else pauseRadio();
+  if (activeAudio().paused) playStation(currentStation, currentIndex); else pauseRadio();
 }
 
 function updateNowPlaying(status) {
@@ -504,19 +403,60 @@ function updateNowPlaying(status) {
   }
 }
 
-function setCover(el, station) {
-  if (station.favicon) {
-    el.style.backgroundImage = `url("${String(station.favicon).replaceAll('"','%22')}")`;
-    el.classList.add('has-image');
-    el.textContent = '';
-  } else {
-    el.style.backgroundImage = '';
-    el.classList.remove('has-image');
-    el.textContent = initials(station.name);
+function normalizedLogoUrl(url) {
+  const value = String(url || '').trim();
+  if (!value) return '';
+  try {
+    const parsed = new URL(value, window.location.href);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return '';
+    // HTTPS pages cannot display HTTP station artwork because browsers block mixed content.
+    // Try the HTTPS version first; if that host does not support it, the initials stay visible.
+    if (window.location.protocol === 'https:' && parsed.protocol === 'http:') parsed.protocol = 'https:';
+    return parsed.href;
+  } catch (_) {
+    return '';
   }
 }
-function coverStyle(station) {
-  return station.favicon ? `style="background-image:url('${escapeAttr(station.favicon)}')"` : '';
+
+function logoMarkup(station, compact = false) {
+  const fallback = `<span class="logo-fallback${compact ? ' compact' : ''}">${escapeHtml(initials(station.name))}</span>`;
+  const src = normalizedLogoUrl(station.favicon);
+  if (!src) return fallback;
+  return `${fallback}<img class="station-logo-img" src="${escapeAttr(src)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">`;
+}
+
+function wireLogoFallbacks(root) {
+  root.querySelectorAll('.station-logo-img').forEach(img => {
+    const fail = () => img.remove();
+    img.addEventListener('error', fail, { once: true });
+    if (img.complete && img.naturalWidth === 0) fail();
+  });
+}
+
+function setCover(el, station) {
+  const fallback = initials(station.name);
+  const src = normalizedLogoUrl(station.favicon);
+  el.style.backgroundImage = '';
+  el.classList.remove('has-image');
+  el.textContent = fallback;
+  if (!src) return;
+
+  const requestedStation = station.stationuuid;
+  const img = new Image();
+  img.referrerPolicy = 'no-referrer';
+  img.onload = () => {
+    if (currentStation?.stationuuid !== requestedStation) return;
+    el.style.backgroundImage = `url("${src.replaceAll('\"', '%22')}")`;
+    el.classList.add('has-image');
+    el.textContent = '';
+  };
+  img.onerror = () => {
+    if (currentStation?.stationuuid !== requestedStation) return;
+    el.style.backgroundImage = '';
+    el.classList.remove('has-image');
+    el.textContent = fallback;
+  };
+  img.src = src;
 }
 function firstTags(station) {
   return String(station.tags || '').split(',').map(s => s.trim()).filter(Boolean).slice(0,2).join(' · ');
@@ -660,22 +600,14 @@ function applyEqPreset(name) {
 }
 
 async function toggleEq(on) {
-  if (isIOS && on) {
-    eqEnabled = false;
-    eqToggle.checked = false;
-    updateEqUi('На iPhone отключён для экономии аккумулятора и стабильности');
-    showToast('Эквалайзер отключён на iPhone для стабильной работы');
-    return;
-  }
   if (!on) {
     eqEnabled = false;
     eqToggle.checked = false;
     updateEqUi('Включается для совместимых потоков');
-    if (audioContext?.state === 'running') await audioContext.suspend().catch(() => {});
     if (currentStation) {
       const wasPlaying = !eqAudio.paused;
       eqAudio.pause();
-      if (wasPlaying) await playStation(currentStation, currentIndex, { forceReload: true });
+      if (wasPlaying) await playStation(currentStation, currentIndex);
     }
     return;
   }
@@ -762,12 +694,6 @@ prevBtn.addEventListener('click', () => moveStation(-1));
 nextBtn.addEventListener('click', () => moveStation(1));
 $('miniOpenBtn').addEventListener('click', () => $('hero').scrollIntoView({ behavior:'smooth', block:'start' }));
 
-volume.addEventListener('input', () => {
-  const v = Number(volume.value);
-  audio.volume = v;
-  eqAudio.volume = v;
-  localStorage.setItem('radioVolume', String(v));
-});
 
 $('settingsBtn').addEventListener('click', () => settingsDialog.showModal());
 $('addStationBtn').addEventListener('click', () => addStationDialog.showModal());
@@ -803,69 +729,17 @@ $('addStationForm').addEventListener('submit', (e) => {
 });
 
 [audio, eqAudio].forEach(player => {
-  player.addEventListener('playing', () => {
-    if (player !== activeAudio()) return;
-    clearTimeout(waitingTimer);
-    waitingTimer = null;
-    reconnectAttempts = 0;
-    updateNowPlaying('В эфире');
-  });
-  player.addEventListener('pause', () => {
-    if (currentStation && audio.paused && eqAudio.paused && !wantedPlaying) updateNowPlaying('Пауза');
-  });
-  player.addEventListener('waiting', () => {
-    if (player !== activeAudio() || !currentStation || !wantedPlaying) return;
-    updateNowPlaying('Буферизация…');
-    clearTimeout(waitingTimer);
-    waitingTimer = setTimeout(() => {
-      waitingTimer = null;
-      if (wantedPlaying && player === activeAudio()) {
-        reconnectCurrent('Поток завис — переподключаемся…');
-      }
-    }, 6000);
-  });
-  player.addEventListener('stalled', () => {
-    if (player === activeAudio() && wantedPlaying) scheduleReconnect(2500, 'Связь прервалась — восстанавливаем…');
-  });
-  player.addEventListener('error', () => {
-    if (player !== activeAudio() || !currentStation) return;
-    updateNowPlaying('Ошибка потока');
-    scheduleReconnect(1200, 'Восстанавливаем эфир…');
-  });
+  player.addEventListener('playing', () => { if (player === activeAudio()) updateNowPlaying('В эфире'); });
+  player.addEventListener('pause', () => { if (currentStation && audio.paused && eqAudio.paused) updateNowPlaying('Пауза'); });
+  player.addEventListener('waiting', () => { if (player === activeAudio() && currentStation) updateNowPlaying('Буферизация…'); });
+  player.addEventListener('error', () => { if (player === activeAudio() && currentStation) updateNowPlaying('Ошибка потока'); });
 });
 
 if ('mediaSession' in navigator) {
-  navigator.mediaSession.setActionHandler('play', () => {
-    if (!currentStation) return;
-    reconnectAttempts = 0;
-    playStation(currentStation, currentIndex, { forceReload: true });
-  });
+  navigator.mediaSession.setActionHandler('play', () => currentStation && playStation(currentStation, currentIndex));
   navigator.mediaSession.setActionHandler('pause', pauseRadio);
   navigator.mediaSession.setActionHandler('previoustrack', () => moveStation(-1));
   navigator.mediaSession.setActionHandler('nexttrack', () => moveStation(1));
-}
-
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'visible' || !wantedPlaying || !currentStation) return;
-  setTimeout(() => {
-    if (wantedPlaying && currentStation && activeAudio().paused) {
-      reconnectAttempts = 0;
-      reconnectCurrent('Возвращаемся в эфир…');
-    }
-  }, 450);
-});
-
-window.addEventListener('pageshow', () => {
-  if (wantedPlaying && currentStation && activeAudio().paused) {
-    setTimeout(() => reconnectCurrent('Восстанавливаем эфир…'), 450);
-  }
-});
-
-if (isIOS) {
-  eqEnabled = false;
-  eqToggle.checked = false;
-  eqToggle.disabled = true;
-  updateEqUi('На iPhone отключён: меньше расход аккумулятора и выше стабильность');
 }
 
 if ('serviceWorker' in navigator) {
